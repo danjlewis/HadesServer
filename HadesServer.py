@@ -22,27 +22,27 @@ def parse_incoming_message(msg):
     try:
         obj = json.loads(msg)
     except json.JSONDecodeError:
-        return None
-
-    if "type" not in obj:
-        return None
-    if type(obj["type"]) != str:
-        return None
-
-    if "data" not in obj:
-        obj["data"] = None
+        return (None, None)
 
     if "request_uuid" not in obj:
         obj["request_uuid"] = str(uuid.uuid4())
     if type(obj["request_uuid"]) != str:
-        return None
+        return (None, None)
+
+    if "type" not in obj:
+        return (None, obj["request_uuid"])
+    if type(obj["type"]) != str:
+        return (None, obj["request_uuid"])
+
+    if "data" not in obj:
+        obj["data"] = (None, obj["request_uuid"])
 
     INCOMING_MESSAGE_TYPE_CODES = {"repl": IncomingMessageType.REPL, "data": IncomingMessageType.DATA}
     if obj["type"] not in INCOMING_MESSAGE_TYPE_CODES:
-        return None
+        return (None, obj["request_uuid"])
     msg_type = INCOMING_MESSAGE_TYPE_CODES[obj["type"]]
 
-    return IncomingMessage(msg_type, obj["data"], obj["request_uuid"])
+    return (IncomingMessage(msg_type, obj["data"], obj["request_uuid"]), obj["request_uuid"])
 
 def run():
     async def handler(socket):
@@ -56,14 +56,16 @@ def run():
         Scribe.AddHook(hook, "Out: ")
 
         async for raw_msg in socket:
-            msg = parse_incoming_message(raw_msg)
+            msg, uuid = parse_incoming_message(raw_msg)
+
+            uuid_msg = "unknown request UUID" if uuid is None else f"request {msg.request_uuid}"
             if msg is None:
-                await socket.send(f"Invalid message format! (unknown request UUID)")
+                await socket.send(f"Invalid message format! ({uuid_msg})")
                 continue
 
             if msg.type == IncomingMessageType.REPL:
                 if type(msg.data) != str:
-                    await socket.send(f"Invalid message format! (request {msg.request_uuid})")
+                    await socket.send(f"Invalid message format! ({uuid_msg})")
                     continue
 
                 Scribe.Modules.StyxScribeREPL.RunLua(msg.data)
