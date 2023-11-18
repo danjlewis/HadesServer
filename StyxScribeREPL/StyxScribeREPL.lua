@@ -40,7 +40,7 @@ function StyxScribeREPL.RunPython(message)
 end
 
 local function runLua(message)
-	return StyxScribeREPL.RunLua(message, false)
+	return StyxScribeREPL.RunLua(message, true)
 end
 
 StyxScribeREPL.Internal = ModUtil.UpValues(function()
