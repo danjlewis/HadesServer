@@ -6,6 +6,8 @@ import enum
 import dataclasses
 import uuid
 
+LOGGING_PREFIX = "HadesServer: "
+
 @enum.unique
 class IncomingMessageType(enum.Enum):
     REPL = enum.auto()
@@ -17,60 +19,87 @@ class IncomingMessage:
     data: any = None
     request_uuid: str = dataclasses.field(default_factory=lambda: str(uuid.uuid4()))
 
-def parse_incoming_message(msg):
-    obj = None
-    try:
-        obj = json.loads(msg)
-    except json.JSONDecodeError:
-        return (None, None)
+    @staticmethod
+    def deserialize(s):
+        obj = None
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            return (None, {"error": "invalid JSON", "request_uuid": None})
 
-    if "request_uuid" not in obj:
-        obj["request_uuid"] = str(uuid.uuid4())
-    if type(obj["request_uuid"]) != str:
-        return (None, None)
+        if "request_uuid" not in obj:
+            obj["request_uuid"] = str(uuid.uuid4())
+        if type(obj["request_uuid"]) != str:
+            return (None, {"error": "invalid `request_uuid` field type", "request_uuid": None})
 
-    if "type" not in obj:
-        return (None, obj["request_uuid"])
-    if type(obj["type"]) != str:
-        return (None, obj["request_uuid"])
+        if "type" not in obj:
+            return (None, {"error": "missing `type` field", "request_uuid": obj["request_uuid"]})
+        if type(obj["type"]) != str:
+            return (None, {"error": "invalid `type` field type", "request_uuid": obj["request_uuid"]})
 
-    if "data" not in obj:
-        obj["data"] = (None, obj["request_uuid"])
+        if "data" not in obj:
+            obj["data"] = None
 
-    INCOMING_MESSAGE_TYPE_CODES = {"repl": IncomingMessageType.REPL, "data": IncomingMessageType.DATA}
-    if obj["type"] not in INCOMING_MESSAGE_TYPE_CODES:
-        return (None, obj["request_uuid"])
-    msg_type = INCOMING_MESSAGE_TYPE_CODES[obj["type"]]
+        INCOMING_MESSAGE_TYPE_CODES = {"repl": IncomingMessageType.REPL, "data": IncomingMessageType.DATA}
+        if obj["type"] not in INCOMING_MESSAGE_TYPE_CODES:
+            return (None, {"error": "invalid `type` field value", "request_uuid": obj["request_uuid"]})
+        msg_type = INCOMING_MESSAGE_TYPE_CODES[obj["type"]]
 
-    return (IncomingMessage(msg_type, obj["data"], obj["request_uuid"]), obj["request_uuid"])
+        return (IncomingMessage(msg_type, obj["data"], obj["request_uuid"]), None)
+
+@enum.unique
+class OutgoingMessageType(enum.Enum):
+    REPL_OUTPUT = enum.auto()
+    ERROR = enum.auto()
+
+@dataclasses.dataclass
+class OutgoingMessage:
+    type: OutgoingMessageType
+    data: any = None
+    request_uuid: str = None
+
+    def serialize(self):
+        obj = dataclasses.asdict(self)
+
+        OUTGOING_MESSAGE_TYPE_CODES = {OutgoingMessageType.REPL_OUTPUT: "repl_output", OutgoingMessageType.ERROR: "error"}
+        obj["type"] = OUTGOING_MESSAGE_TYPE_CODES[obj["type"]]
+
+        obj = {k: v for k, v in obj.items() if v is not None}
+
+        return json.dumps(obj)
 
 def run():
     async def handler(socket):
-        print("Client connected!")
+        print(LOGGING_PREFIX + "Client connected!")
 
-        async def hook(msg):
+        async def hook(output):
             if not socket.open:
                 return
 
-            await socket.send(msg)
-        Scribe.AddHook(hook, "Out: ")
+            request_uuid = None
+            if output.startswith("Request "):
+                output_split = output.split(": ")
+                request_uuid = output_split[0][8:]
+                output = "".join(output_split[1:])
 
-        async for raw_msg in socket:
-            msg, uuid = parse_incoming_message(raw_msg)
+            await socket.send(OutgoingMessage(OutgoingMessageType.REPL_OUTPUT, output, request_uuid).serialize())
+        Scribe.AddHook(hook, "Response: ")
 
-            uuid_msg = "unknown request UUID" if uuid is None else f"request {msg.request_uuid}"
-            if msg is None:
-                await socket.send(f"Invalid message format! ({uuid_msg})")
+        async for msg in socket:
+            msg, err = IncomingMessage.deserialize(msg)
+
+            if err is not None:
+                await socket.send(OutgoingMessage(OutgoingMessageType.ERROR, err["error"], err["request_uuid"]).serialize())
                 continue
 
             if msg.type == IncomingMessageType.REPL:
                 if type(msg.data) != str:
-                    await socket.send(f"Invalid message format! ({uuid_msg})")
+                    await socket.send(OutgoingMessage(OutgoingMessageType.ERROR, "invalid `data` field type", msg.request_uuid).serialize())
                     continue
 
-                Scribe.Modules.StyxScribeREPL.RunLua(msg.data)
+                Scribe.Send(f"StyxScribeREPL: Request {msg.request_uuid}: {msg.data}")
 
-        print("Client disconnected.")
+        print(LOGGING_PREFIX + "Client disconnected.")
 
     async def run():
         PORT = 8000

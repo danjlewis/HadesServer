@@ -21,6 +21,26 @@ local function toString(obj)
 end
 
 function StyxScribeREPL.RunLua(message, echo)
+	-- modified...
+	local uuid = nil
+	if message:sub(1, 8) == "Request " then
+		message = message:sub(9, #message)
+
+		local i = 1
+		while i <= #message do
+			local char = message:sub(i, i)
+			if char == ":" then
+				i = i - 1
+				break
+			end
+			i = i + 1
+		end
+
+		uuid = message:sub(1, i)
+		message = message:sub(i + 3, #message)
+	end
+	-- end
+
 	local func, err = load("return " .. message)
 	if not func then
 		func, err = load(message)
@@ -30,7 +50,13 @@ function StyxScribeREPL.RunLua(message, echo)
 	local ret = table.pack(pcall(func))
 	if ret.n <= 1 then return end
 	if echo then
-		print("Out: " .. ModUtil.Args.Map(toString, table.unpack(ret, 2, ret.n)))
+		-- modified...
+		if uuid == nil then
+			print("Response: " .. ModUtil.Args.Map(toString, table.unpack(ret, 2, ret.n)))
+		else
+			print("Response: Request " .. uuid .. ": " .. ModUtil.Args.Map(toString, table.unpack(ret, 2, ret.n)))
+		end
+		-- end
 	end
 	return table.unpack(ret, 2, ret.n)
 end
