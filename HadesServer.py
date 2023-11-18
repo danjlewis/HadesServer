@@ -59,10 +59,12 @@ def run():
             msg = parse_incoming_message(raw_msg)
             if msg is None:
                 await socket.send(f"Invalid message format! (unknown request UUID)")
+                continue
 
             if msg.type == IncomingMessageType.REPL:
                 if type(msg.data) != str:
                     await socket.send(f"Invalid message format! (request {msg.request_uuid})")
+                    continue
 
                 Scribe.Modules.StyxScribeREPL.RunLua(msg.data)
 
