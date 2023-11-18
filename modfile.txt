@@ -1,0 +1,7 @@
+Load Priority 0
+
+Include "StyxScribeREPL/modfile.txt"
+Include "StyxScribeShared/modfile.txt"
+
+To "StyxScribeScripts/HadesServer.py"
+Replace "HadesServer.py"
